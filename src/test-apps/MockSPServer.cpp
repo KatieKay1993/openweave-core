@@ -1,5 +1,6 @@
 /*
  *
+ *    Copyright (c) 2020 Google LLC.
  *    Copyright (c) 2013-2017 Nest Labs, Inc.
  *    All rights reserved.
  *
@@ -93,6 +94,7 @@ WEAVE_ERROR MockServiceProvisioningServer::Init(WeaveExchangeManager *exchangeMg
     mPersistedServiceConfigLen = 0;
     mPairingServerCon = NULL;
     mPairingServerBinding = NULL;
+    mMockCAClient = NULL;
 
 exit:
     return err;
@@ -236,6 +238,9 @@ WEAVE_ERROR MockServiceProvisioningServer::HandleRegisterServicePairAccount(Regi
         ExitNow();
     }
 
+    AsyncStartCertificateProvisioning();
+
+    /*
     if (kPairingTransport_TCP == PairingTransport)
     {
         // At this point, the device must send a PairDeviceToAccount request to the service endpoint that handles
@@ -270,6 +275,57 @@ WEAVE_ERROR MockServiceProvisioningServer::HandleRegisterServicePairAccount(Regi
     {
         err = WEAVE_ERROR_INCORRECT_STATE;
     }
+    */
+
+exit:
+    return err;
+}
+
+static void MockServiceProvisioningServer::AsyncStartCertificateProvisioning()
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
+
+    // Allocate temporary memory to hold the mock certificate provisioning client.
+    mMockCPClient = static_cast<MockCertificateProvisioningClient *>(MemoryAlloc(sizeof(MockCertificateProvisioningClient)));
+    VerifyOrExit(mMockCPClient != NULL, err = WEAVE_ERROR_NO_MEMORY);
+
+    // Initialize mock certificate provisioning client.
+    err = mMockCPClient->Init(WeaveCertProvEngine::kReqType_GetInitialOpDeviceCert, EncodeGetCertificateRequestAuthInfo);
+    SuccessOrExit(err);
+
+    // Start certificate provisioning.
+    mMockCPClient->StartCertificateProvisioning();
+
+exit:
+    if (err != WEAVE_NO_ERROR)
+    {
+        MemoryFree(mMockCPClient);
+        mMockCPClient = NULL;
+
+        HandlePairDeviceToAccountResult(err, kWeaveProfile_Common, Profiles::Common::kStatus_InternalServerProblem);
+    }
+}
+
+WEAVE_ERROR MockServiceProvisioningServer::EncodeGetCertificateRequestAuthInfo(TLVWriter & writer)
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
+    const RegisterServicePairAccountMessage & regServiceMsg = mCurClientOpMsg.RegisterServicePairAccount;
+
+    // Encode pairing token.
+    err = writer.PutBytes(ContextTag(kTag_GetCertReqMsg_Authorize_PairingToken), regServiceMsg.PairingToken, regServiceMsg.PairingTokenLen);
+    SuccessOrExit(err);
+
+    // Encode pairing initialization data.
+    err = writer.PutBytes(ContextTag(kTag_GetCertReqMsg_Authorize_PairingInitData), regServiceMsg.PairingInitData, regServiceMsg.PairingInitDataLen);
+    SuccessOrExit(err);
+
+exit:
+    return err;
+}
+
+static WEAVE_ERROR MockServiceProvisioningServer::HandleCertificateProvisioningResult(nl::Weave::WeaveConnection *con, WEAVE_ERROR conErr)
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
 
 exit:
     return err;
