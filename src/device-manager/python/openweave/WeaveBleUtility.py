@@ -17,7 +17,7 @@
 
 #
 #    @file
-#      This file is uitilies for Weave BLE
+#      This file is utilies for Weave BLE
 #
 
 from __future__ import absolute_import
@@ -25,6 +25,7 @@ from __future__ import print_function
 import binascii
 import logging
 from ctypes import *
+from .WeaveUtility import WeaveUtility
 import six
 
 
@@ -52,7 +53,7 @@ CBCharacteristicWriteWithoutResponse = 1
 
 def _VoidPtrToUUIDString(ptr, len):
     try:
-        ptr = _VoidPtrToByteArray(ptr, len)
+        ptr = WeaveUtility.VoidPtrToByteArray(ptr, len)
         ptr = binascii.hexlify(ptr)
         ptr = ptr[:8] + '-' + ptr[8:12] + '-' + ptr[12:16] + '-' + ptr[16:20] + '-' + ptr[20:]
         ptr = str(ptr)
@@ -62,20 +63,6 @@ def _VoidPtrToUUIDString(ptr, len):
 
     return ptr
 
-def _VoidPtrToByteArray(ptr, len):
-    if ptr:
-        v = bytearray(len)
-        memmove((c_byte * len).from_buffer(v), ptr, len)
-        return v
-    else:
-        return None
-
-def _ByteArrayToVoidPtr(array):
-    if array != None:
-        return cast( (c_byte * len(array)) .from_buffer_copy(array), c_void_p)
-    else:
-        return c_void_p(0)
-
 def ParseBleEventType(val):
     if isinstance(val, six.integer_types):
         return val
@@ -84,7 +71,6 @@ def ParseBleEventType(val):
     if (val.lower() == "tx"):
         return BleEventType_Tx
     raise Exception("Invalid Ble Event Type: " + str(val))
-
 
 class BleTxEvent:
     def __init__(self,  svcId=None, charId=None, status=False):
@@ -221,8 +207,8 @@ class BleTxEventStruct(Structure):
 
     def toBleTxEvent(self):
         return BleTxEvent(
-            svcId = _VoidPtrToByteArray(self.SvcId, 16),
-            charId = _VoidPtrToByteArray(self.CharId, 16),
+            svcId = WeaveUtility.VoidPtrToByteArray(self.SvcId, 16),
+            charId = WeaveUtility.VoidPtrToByteArray(self.CharId, 16),
             status = self.Status
         )
 
@@ -231,8 +217,8 @@ class BleTxEventStruct(Structure):
         bleTxEventStruct = cls()
         bleTxEventStruct.EventType = bleTxEvent.EventType
         bleTxEventStruct.ConnObj = c_void_p(FAKE_CONN_OBJ_VALUE)
-        bleTxEventStruct.SvcId = _ByteArrayToVoidPtr(bleTxEvent.SvcId)
-        bleTxEventStruct.CharId = _ByteArrayToVoidPtr(bleTxEvent.CharId)
+        bleTxEventStruct.SvcId = WeaveUtility.ByteArrayToVoidPtr(bleTxEvent.SvcId)
+        bleTxEventStruct.CharId = WeaveUtility.ByteArrayToVoidPtr(bleTxEvent.CharId)
         bleTxEventStruct.Status = bleTxEvent.Status
         return bleTxEventStruct
 
@@ -268,9 +254,9 @@ class BleRxEventStruct(Structure):
 
     def toBleRxEvent(self):
         return BleRxEvent(
-            svcId = _VoidPtrToByteArray(self.SvcId, 16),
-            charId = _VoidPtrToByteArray(self.CharId, 16),
-            buffer = _VoidPtrToByteArray(self.Buffer, self.Length)
+            svcId = WeaveUtility.VoidPtrToByteArray(self.SvcId, 16),
+            charId = WeaveUtility.VoidPtrToByteArray(self.CharId, 16),
+            buffer = WeaveUtility.VoidPtrToByteArray(self.Buffer, self.Length)
         )
 
     @classmethod
@@ -278,9 +264,9 @@ class BleRxEventStruct(Structure):
         bleRxEventStruct = cls()
         bleRxEventStruct.EventType = bleRxEvent.EventType
         bleRxEventStruct.ConnObj = c_void_p(FAKE_CONN_OBJ_VALUE)
-        bleRxEventStruct.SvcId = _ByteArrayToVoidPtr(bleRxEvent.SvcId)
-        bleRxEventStruct.CharId = _ByteArrayToVoidPtr(bleRxEvent.CharId)
-        bleRxEventStruct.Buffer = _ByteArrayToVoidPtr(bleRxEvent.Buffer)
+        bleRxEventStruct.SvcId = WeaveUtility.ByteArrayToVoidPtr(bleRxEvent.SvcId)
+        bleRxEventStruct.CharId = WeaveUtility.ByteArrayToVoidPtr(bleRxEvent.CharId)
+        bleRxEventStruct.Buffer = WeaveUtility.ByteArrayToVoidPtr(bleRxEvent.Buffer)
         bleRxEventStruct.Length = len(bleRxEvent.Buffer) if (bleRxEvent.Buffer != None) else 0
         return bleRxEventStruct
 
@@ -296,8 +282,8 @@ class BleSubscribeEventStruct(Structure):
 
     def toBleSubscribeEvent(self):
         return BleSubscribeEvent(
-            svcId = _VoidPtrToByteArray(self.SvcId, 16),
-            charId = _VoidPtrToByteArray(self.CharId, 16),
+            svcId = WeaveUtility.VoidPtrToByteArray(self.SvcId, 16),
+            charId = WeaveUtility.VoidPtrToByteArray(self.CharId, 16),
             status = self.Status,
             operation = self.Operation
         )
@@ -307,8 +293,8 @@ class BleSubscribeEventStruct(Structure):
         bleSubscribeEventStruct = cls()
         bleSubscribeEventStruct.EventType = bleSubscribeEvent.EventType
         bleSubscribeEventStruct.ConnObj = c_void_p(FAKE_CONN_OBJ_VALUE)
-        bleSubscribeEventStruct.SvcId = _ByteArrayToVoidPtr(bleSubscribeEvent.SvcId)
-        bleSubscribeEventStruct.CharId = _ByteArrayToVoidPtr(bleSubscribeEvent.CharId)
+        bleSubscribeEventStruct.SvcId = WeaveUtility.ByteArrayToVoidPtr(bleSubscribeEvent.SvcId)
+        bleSubscribeEventStruct.CharId = WeaveUtility.ByteArrayToVoidPtr(bleSubscribeEvent.CharId)
         bleSubscribeEventStruct.Operation = bleSubscribeEvent.Operation
         bleSubscribeEventStruct.Status = bleSubscribeEvent.Status
         return bleSubscribeEventStruct

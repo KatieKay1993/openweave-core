@@ -40,7 +40,7 @@ import objc
 from PyObjCTools import AppHelper
 
 from .WeaveBleUtility import *
-from .WeaveBleUtility import _VoidPtrToByteArray
+from .WeaveUtility import WeaveUtility
 
 from .WeaveBleBase import WeaveBleBase
 
@@ -57,7 +57,7 @@ chromecast_setup_service_short = CBUUID.UUIDWithString_(u'FEA0')
 
 def _VoidPtrToCBUUID(ptr, len):
     try:
-        ptr = _VoidPtrToByteArray(ptr, len)
+        ptr = WeaveUtility.VoidPtrToByteArray(ptr, len)
         ptr = binascii.hexlify(ptr)
         ptr = ptr[:8] + '-' + ptr[8:12] + '-' + ptr[12:16] + '-' + ptr[16:20] + '-' + ptr[20:]
         ptr = CBUUID.UUIDWithString_(ptr)
@@ -492,7 +492,7 @@ class CoreBluetoothManager(WeaveBleBase):
         """ Called by WeaveDeviceMgr.py to satisfy a request by Weave to transmit a packet over BLE."""
         result = False
 
-        bytes = _VoidPtrToByteArray(buffer, length)
+        bytes = WeaveUtility.VoidPtrToByteArray(buffer, length)
         bytes = NSData.dataWithBytes_length_(bytes, len(bytes)) # convert bytearray to NSData
 
         svcId = _VoidPtrToCBUUID(svcId, 16)

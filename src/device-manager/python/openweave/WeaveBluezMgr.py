@@ -49,8 +49,8 @@ except:
     from pgi.repository import GObject
 
 from .WeaveBleUtility import *
+from .WeaveUtility import WeaveUtility
 from .WeaveBleUtility import _VoidPtrToUUIDString
-from .WeaveBleUtility import _VoidPtrToByteArray
 
 from .WeaveBleBase import WeaveBleBase
 
@@ -226,7 +226,7 @@ class BluezDbusAdapter():
         except:
             self.logger.debug(traceback.format_exc())
             return False
-        
+
     def DiscoverableTimeout(self, timeoutSec):
         try:
             result = self.adapter_properties.Set(ADAPTER_INTERFACE, 'DiscoverableTimeout', timeoutSec)
@@ -987,7 +987,7 @@ class BluezManager(WeaveBleBase):
         self.logger.debug("write start")
         result = False
         if self.target and self.target.Connected:
-            converted_data = str(_VoidPtrToByteArray(buffer, length))
+            converted_data = str(WeaveUtility.VoidPtrToByteArray(buffer, length))
             self.charId_tx = bytearray(uuid.UUID(str(_VoidPtrToUUIDString(charId, 16))).bytes)
             self.svcId_tx = bytearray(uuid.UUID(str(_VoidPtrToUUIDString(svcId, 16))).bytes)
             self.tx.WriteValue(dbus.Array([dbus.Byte(ord(i)) for i in converted_data], 'y'),
