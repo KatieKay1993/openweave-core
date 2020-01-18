@@ -1,4 +1,3 @@
-/*
  *
  *    Copyright (c) 2019 Google LLC.
  *    Copyright (c) 2013-2018 Nest Labs, Inc.
