@@ -16,13 +16,16 @@
  *    limitations under the License.
  */
 
-#include <Weave/DeviceLayer/internal/WeaveDeviceLayerInternal.h>
-#include <Weave/DeviceLayer/internal/CertificateProvisioningClient.h>
+#include "ToolCommon.h"
+#include "MockCPClient.h"
+#include "MockDDServer.h"
 #include <Weave/Core/WeaveTLV.h>
 #include <Weave/Profiles/common/CommonProfile.h>
 #include <Weave/Profiles/security/WeaveCert.h>
 #include <Weave/Profiles/security/WeavePrivateKey.h>
 #include <Weave/Profiles/security/WeaveSig.h>
+#include <Weave/Profiles/service-directory/ServiceDirectory.h>
+#include "CASEOptions.h"
 
 using namespace ::nl;
 using namespace ::nl::Weave;
@@ -30,43 +33,145 @@ using namespace ::nl::Weave::TLV;
 using namespace ::nl::Weave::Profiles;
 using namespace ::nl::Weave::Profiles::Security;
 using namespace ::nl::Weave::Profiles::Security::CertProvisioning;
-using namespace ::nl::Weave::Platform::Security;
 
-namespace nl {
-namespace Weave {
-namespace DeviceLayer {
-namespace Internal {
-
-using ::nl::Weave::Platform::Security::MemoryAlloc;
-using ::nl::Weave::Platform::Security::MemoryFree;
-
-#if WEAVE_DEVICE_CONFIG_ENABLE_JUST_IN_TIME_PROVISIONING
-
-WEAVE_ERROR CertificateProvisioningClient::Init(uint8_t reqType)
+MockCertificateProvisioningClient::MockCertificateProvisioningClient(void)
 {
-    return Init(reqType, NULL);
+    mBinding = NULL;
+
+    mDeviceId = kNodeIdNotSpecified;
+    mDeviceCert = NULL;
+    mDeviceCertLen = 0;
+    mDeviceIntermediateCACerts = NULL;
+    mDeviceIntermediateCACertsLen = 0;
+    mDevicePrivateKey = NULL;
+    mDevicePrivateKeyLen = 0;
 }
 
 /**
  * Initialize certificate provisioning client.
  *
+ *  @param[in]  exchangeMgr          A pointer to the system Weave Exchange Manager.
  *  @param[in]  reqType              Get certificate request type.
  *  @param[in]  encodeReqAuthInfo    A pointer to a function that generates ECDSA signature on the given
  *                                   certificate hash using operational device private key.
  *
  *  @retval #WEAVE_NO_ERROR          If certificate provisioning client was successfully initialized.
  */
-WEAVE_ERROR CertificateProvisioningClient::Init(uint8_t reqType, EncodeReqAuthInfoFunct encodeReqAuthInfo)
+WEAVE_ERROR MockCertificateProvisioningClient::Init(WeaveExchangeManager *exchangeMgr, uint8_t reqType, EncodeReqAuthInfoFunct encodeReqAuthInfo)
 {
+    ExchangeMgr = exchangeMgr;
     mReqType = reqType;
-    mDoMfrAttest = (reqType == WeaveCertProvEngine::kReqType_GetInitialOpDeviceCert) ? true : false;
-
     mEncodeReqAuthInfo = encodeReqAuthInfo;
 
+    mDoMfrAttest = (reqType == WeaveCertProvEngine::kReqType_GetInitialOpDeviceCert) ? true : false;
+
+    CertificateProvisioningEndPointId = 0x18B4300200000016ULL;
+
     mBinding = NULL;
-    mWaitingForServiceConnectivity = false;
+
+    mDeviceId = kNodeIdNotSpecified;
+    mDeviceCert = NULL;
+    mDeviceCertLen = 0;
+    mDeviceIntermediateCACerts = NULL;
+    mDeviceIntermediateCACertsLen = 0;
+    mDevicePrivateKey = NULL;
+    mDevicePrivateKeyLen = 0;
 
     return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::Shutdown(void)
+{
+    ClearOperationalDeviceCredentials();
+
+    return WEAVE_NO_ERROR;
+}
+
+void MockCertificateProvisioningClient::Reset(void)
+{
+    ClearOperationalDeviceCredentials();
+}
+
+void MockCertificateProvisioningClient::Preconfig()
+{
+    // This dummy service config object contains the following information:
+    //
+    //    Trusted Certificates:
+    //        The Nest Development Root Certificate
+    //        A dummy "account" certificate with a common name of "DUMMY-ACCOUNT-ID" (see below)
+    //
+    //    Directory End Point:
+    //        Endpoint Id: 18B4300200000001 (the service directory endpoint)
+    //        Endpoint Host Name: frontdoor.integration.nestlabs.com
+    //        Endpoint Port: 11095 (the weave default port)
+    //
+    // The dummy account certificate is:
+    //
+    //    1QAABAABADABCE4vMktB1zrbJAIENwMsgRBEVU1NWS1BQ0NPVU5ULUlEGCYEy6j6GyYFSzVPQjcG
+    //    LIEQRFVNTVktQUNDT1VOVC1JRBgkBwImCCUAWiMwCjkEK9nbWmLvurFTKg+ZY7eKMMWKQSmlGU5L
+    //    C/N+2sXpszXwdRhtSV2GxEQlB0G006nv7rQq1gpdneA1gykBGDWCKQEkAgUYNYQpATYCBAIEARgY
+    //    NYEwAghCPJVfRh5S2xg1gDACCEI8lV9GHlLbGDUMMAEdAIphhmI9F7LSz9JtOT3kJWngkeoFanXO
+    //    3UXrg88wAhx0tCukbRRlt7dxmlqvZNKIYG6zsaAxypJvyvJDGBg=
+    //
+    // The corresponding private key is:
+    //
+    //    1QAABAACACYBJQBaIzACHLr840+Gv3w4EnAr+aMQv0+b8+8wD6VETUI6Z2owAzkEK9nbWmLvurFT
+    //    Kg+ZY7eKMMWKQSmlGU5LC/N+2sXpszXwdRhtSV2GxEQlB0G006nv7rQq1gpdneAY
+    //
+    // The following is a fabric access token containing the dummy account certificate and
+    // private key.  This can be used to authenticate to the mock device when it has been
+    // configured to use the dummy service config.
+    //
+    //    1QAABAAJADUBMAEITi8yS0HXOtskAgQ3AyyBEERVTU1ZLUFDQ09VTlQtSUQYJgTLqPobJgVLNU9C
+    //    NwYsgRBEVU1NWS1BQ0NPVU5ULUlEGCQHAiYIJQBaIzAKOQQr2dtaYu+6sVMqD5ljt4owxYpBKaUZ
+    //    TksL837axemzNfB1GG1JXYbERCUHQbTTqe/utCrWCl2d4DWDKQEYNYIpASQCBRg1hCkBNgIEAgQB
+    //    GBg1gTACCEI8lV9GHlLbGDWAMAIIQjyVX0YeUtsYNQwwAR0AimGGYj0XstLP0m05PeQlaeCR6gVq
+    //    dc7dReuDzzACHHS0K6RtFGW3t3GaWq9k0ohgbrOxoDHKkm/K8kMYGDUCJgElAFojMAIcuvzjT4a/
+    //    fDgScCv5oxC/T5vz7zAPpURNQjpnajADOQQr2dtaYu+6sVMqD5ljt4owxYpBKaUZTksL837axemz
+    //    NfB1GG1JXYbERCUHQbTTqe/utCrWCl2d4BgY
+    //
+    //
+    static const char dummyAccountId[] = "DUMMY-ACCOUNT-ID";
+    static const uint8_t dummyServiceConfig[] =
+    {
+        0xd5, 0x00, 0x00, 0x0f, 0x00, 0x01, 0x00, 0x36, 0x01, 0x15, 0x30, 0x01, 0x08, 0x4e, 0x2f, 0x32,
+        0x4b, 0x41, 0xd7, 0x3a, 0xdb, 0x24, 0x02, 0x04, 0x37, 0x03, 0x2c, 0x81, 0x10, 0x44, 0x55, 0x4d,
+        0x4d, 0x59, 0x2d, 0x41, 0x43, 0x43, 0x4f, 0x55, 0x4e, 0x54, 0x2d, 0x49, 0x44, 0x18, 0x26, 0x04,
+        0xcb, 0xa8, 0xfa, 0x1b, 0x26, 0x05, 0x4b, 0x35, 0x4f, 0x42, 0x37, 0x06, 0x2c, 0x81, 0x10, 0x44,
+        0x55, 0x4d, 0x4d, 0x59, 0x2d, 0x41, 0x43, 0x43, 0x4f, 0x55, 0x4e, 0x54, 0x2d, 0x49, 0x44, 0x18,
+        0x24, 0x07, 0x02, 0x26, 0x08, 0x25, 0x00, 0x5a, 0x23, 0x30, 0x0a, 0x39, 0x04, 0x2b, 0xd9, 0xdb,
+        0x5a, 0x62, 0xef, 0xba, 0xb1, 0x53, 0x2a, 0x0f, 0x99, 0x63, 0xb7, 0x8a, 0x30, 0xc5, 0x8a, 0x41,
+        0x29, 0xa5, 0x19, 0x4e, 0x4b, 0x0b, 0xf3, 0x7e, 0xda, 0xc5, 0xe9, 0xb3, 0x35, 0xf0, 0x75, 0x18,
+        0x6d, 0x49, 0x5d, 0x86, 0xc4, 0x44, 0x25, 0x07, 0x41, 0xb4, 0xd3, 0xa9, 0xef, 0xee, 0xb4, 0x2a,
+        0xd6, 0x0a, 0x5d, 0x9d, 0xe0, 0x35, 0x83, 0x29, 0x01, 0x18, 0x35, 0x82, 0x29, 0x01, 0x24, 0x02,
+        0x05, 0x18, 0x35, 0x84, 0x29, 0x01, 0x36, 0x02, 0x04, 0x02, 0x04, 0x01, 0x18, 0x18, 0x35, 0x81,
+        0x30, 0x02, 0x08, 0x42, 0x3c, 0x95, 0x5f, 0x46, 0x1e, 0x52, 0xdb, 0x18, 0x35, 0x80, 0x30, 0x02,
+        0x08, 0x42, 0x3c, 0x95, 0x5f, 0x46, 0x1e, 0x52, 0xdb, 0x18, 0x35, 0x0c, 0x30, 0x01, 0x1d, 0x00,
+        0x8a, 0x61, 0x86, 0x62, 0x3d, 0x17, 0xb2, 0xd2, 0xcf, 0xd2, 0x6d, 0x39, 0x3d, 0xe4, 0x25, 0x69,
+        0xe0, 0x91, 0xea, 0x05, 0x6a, 0x75, 0xce, 0xdd, 0x45, 0xeb, 0x83, 0xcf, 0x30, 0x02, 0x1c, 0x74,
+        0xb4, 0x2b, 0xa4, 0x6d, 0x14, 0x65, 0xb7, 0xb7, 0x71, 0x9a, 0x5a, 0xaf, 0x64, 0xd2, 0x88, 0x60,
+        0x6e, 0xb3, 0xb1, 0xa0, 0x31, 0xca, 0x92, 0x6f, 0xca, 0xf2, 0x43, 0x18, 0x18, 0x15, 0x30, 0x01,
+        0x09, 0x00, 0xa8, 0x34, 0x22, 0xe9, 0xd9, 0x75, 0xe4, 0x55, 0x24, 0x02, 0x04, 0x57, 0x03, 0x00,
+        0x27, 0x13, 0x01, 0x00, 0x00, 0xee, 0xee, 0x30, 0xb4, 0x18, 0x18, 0x26, 0x04, 0x95, 0x23, 0xa9,
+        0x19, 0x26, 0x05, 0x15, 0xc1, 0xd2, 0x2c, 0x57, 0x06, 0x00, 0x27, 0x13, 0x01, 0x00, 0x00, 0xee,
+        0xee, 0x30, 0xb4, 0x18, 0x18, 0x24, 0x07, 0x02, 0x24, 0x08, 0x15, 0x30, 0x0a, 0x31, 0x04, 0x78,
+        0x52, 0xe2, 0x9c, 0x92, 0xba, 0x70, 0x19, 0x58, 0x46, 0x6d, 0xae, 0x18, 0x72, 0x4a, 0xfb, 0x43,
+        0x0d, 0xf6, 0x07, 0x29, 0x33, 0x0d, 0x61, 0x55, 0xe5, 0x65, 0x46, 0x8e, 0xba, 0x0d, 0xa5, 0x3f,
+        0xb5, 0x17, 0xc0, 0x47, 0x64, 0x44, 0x02, 0x18, 0x4f, 0xa8, 0x11, 0x24, 0x50, 0xd4, 0x7b, 0x35,
+        0x83, 0x29, 0x01, 0x29, 0x02, 0x18, 0x35, 0x82, 0x29, 0x01, 0x24, 0x02, 0x60, 0x18, 0x35, 0x81,
+        0x30, 0x02, 0x08, 0x42, 0x0c, 0xac, 0xf6, 0xb4, 0x64, 0x71, 0xe6, 0x18, 0x35, 0x80, 0x30, 0x02,
+        0x08, 0x42, 0x0c, 0xac, 0xf6, 0xb4, 0x64, 0x71, 0xe6, 0x18, 0x35, 0x0c, 0x30, 0x01, 0x19, 0x00,
+        0xbe, 0x0e, 0xda, 0xa1, 0x63, 0x5a, 0x8e, 0xf1, 0x52, 0x17, 0x45, 0x80, 0xbd, 0xdc, 0x94, 0x12,
+        0xd4, 0xcc, 0x1c, 0x2c, 0x33, 0x4e, 0x29, 0xdc, 0x30, 0x02, 0x19, 0x00, 0x8b, 0xe7, 0xee, 0x2e,
+        0x11, 0x17, 0x14, 0xae, 0x92, 0xda, 0x2b, 0x3b, 0x6d, 0x2f, 0xd7, 0x5d, 0x9e, 0x5f, 0xcd, 0xb8,
+        0xba, 0x2f, 0x65, 0x76, 0x18, 0x18, 0x18, 0x35, 0x02, 0x27, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02,
+        0x30, 0xb4, 0x18, 0x36, 0x02, 0x15, 0x2c, 0x01, 0x22, 0x66, 0x72, 0x6f, 0x6e, 0x74, 0x64, 0x6f,
+        0x6f, 0x72, 0x2e, 0x69, 0x6e, 0x74, 0x65, 0x67, 0x72, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x2e, 0x6e,
+        0x65, 0x73, 0x74, 0x6c, 0x61, 0x62, 0x73, 0x2e, 0x63, 0x6f, 0x6d, 0x18, 0x18, 0x18, 0x18
+    };
+
+    ClearPersistedService();
+    PersistNewService(0x18B4300100000001ULL, dummyAccountId, strlen(dummyAccountId), dummyServiceConfig, sizeof(dummyServiceConfig));
 }
 
 /**
@@ -78,10 +183,10 @@ WEAVE_ERROR CertificateProvisioningClient::Init(uint8_t reqType, EncodeReqAuthIn
  *  @param[in]  outParam    Reference of output event parameters passed by the event callback.
  *
  */
-void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, WeaveCertProvEngine::EventType eventType, const WeaveCertProvEngine::InEventParam & inParam, WeaveCertProvEngine::OutEventParam & outParam)
+void MockCertificateProvisioningClient::CertProvClientEventHandler(void * appState, WeaveCertProvEngine::EventType eventType, const WeaveCertProvEngine::InEventParam & inParam, WeaveCertProvEngine::OutEventParam & outParam)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
-    CertificateProvisioningClient * client = static_cast<CertificateProvisioningClient *>(appState);
+    MockCertificateProvisioningClient * client = static_cast<MockCertificateProvisioningClient *>(appState);
     WeaveCertProvEngine * certProvEngine = inParam.Source;
 
     switch (eventType)
@@ -90,9 +195,9 @@ void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, 
     {
         if (client->mEncodeReqAuthInfo != NULL)
         {
-            WeaveLogProgress(DeviceLayer, "Preparing authorization information for the GetCertificateRequest message");
+            printf("Preparing authorization information for the GetCertificateRequest message");
 
-            err = client->mEncodeReqAuthInfo(*inParam.PrepareAuthorizeInfo.Writer);
+            err = client->mEncodeReqAuthInfo(client->mReqState, *inParam.PrepareAuthorizeInfo.Writer);
             SuccessOrExit(err);
         }
 
@@ -104,13 +209,13 @@ void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, 
         if (inParam.ResponseReceived.ReplaceCert)
         {
             // Store service issued operational device certificate.
-            err = ConfigurationMgr().StoreDeviceCertificate(inParam.ResponseReceived.Cert, inParam.ResponseReceived.CertLen);
+            err = client->StoreDeviceCertificate(inParam.ResponseReceived.Cert, inParam.ResponseReceived.CertLen);
             SuccessOrExit(err);
 
             if (inParam.ResponseReceived.RelatedCerts != NULL)
             {
                 // Store device intermediate CA certificates related to the service issued operational device certificate.
-                err = ConfigurationMgr().StoreDeviceIntermediateCACerts(inParam.ResponseReceived.RelatedCerts, inParam.ResponseReceived.RelatedCertsLen);
+                err = client->StoreDeviceIntermediateCACerts(inParam.ResponseReceived.RelatedCerts, inParam.ResponseReceived.RelatedCertsLen);
                 SuccessOrExit(err);
             }
 
@@ -123,11 +228,11 @@ void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, 
                 // PlatformMgr().PostEvent(&event);
             }
 
-            WeaveLogProgress(DeviceLayer, "Stored new operational device certificate received from the CA service");
+            printf("Stored new operational device certificate received from the CA service");
         }
         else
         {
-            WeaveLogProgress(DeviceLayer, "CA service reported: no need to replace operational device certificate");
+            printf("CA service reported: no need to replace operational device certificate");
         }
 
         certProvEngine->AbortCertificateProvisioning();
@@ -139,12 +244,12 @@ void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, 
     {
         if (inParam.CommunicationError.Reason == WEAVE_ERROR_STATUS_REPORT_RECEIVED)
         {
-            WeaveLogError(DeviceLayer, "Received status report from the CA service: %s",
+            printf("Received status report from the CA service: %s",
                           nl::StatusReportStr(inParam.CommunicationError.RcvdStatusReport->mProfileId, inParam.CommunicationError.RcvdStatusReport->mStatusCode));
         }
         else
         {
-            WeaveLogError(DeviceLayer, "Failed to prepare/send GetCertificateRequest message: %s", ErrorStr(inParam.CommunicationError.Reason));
+            printf("Failed to prepare/send GetCertificateRequest message: %s", ErrorStr(inParam.CommunicationError.Reason));
         }
 
         certProvEngine->AbortCertificateProvisioning();
@@ -153,7 +258,7 @@ void CertificateProvisioningClient::CertProvClientEventHandler(void * appState, 
     }
 
     default:
-        WeaveLogError(DeviceLayer, "Unrecognized certificate provisioning API event");
+        printf("Unrecognized certificate provisioning API event");
         break;
     }
 
@@ -166,25 +271,14 @@ exit:
 
 // ===== Methods that implement the WeaveNodeOpAuthDelegate interface
 
-WEAVE_ERROR CertificateProvisioningClient::EncodeOpCert(TLVWriter & writer, uint64_t tag)
+WEAVE_ERROR MockCertificateProvisioningClient::EncodeOpCert(TLVWriter & writer, uint64_t tag)
 {
     WEAVE_ERROR err;
     uint8_t * cert = NULL;
-    size_t certLen = 0;
-
-    // Determine the length of the operational device certificate.
-    err = ConfigurationMgr().GetDeviceCertificate((uint8_t *)NULL, 0, certLen);
-    SuccessOrExit(err);
-
-    // Fail if no operational device certificate has been configured.
-    VerifyOrExit(certLen != 0, err = WEAVE_ERROR_CERT_NOT_FOUND);
-
-    // Create a temporary buffer to hold the operational device certificate.
-    cert = static_cast<uint8_t *>(MemoryAlloc(certLen));
-    VerifyOrExit(cert != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    uint16_t certLen = 0;
 
     // Read the operational device certificate.
-    err = ConfigurationMgr().GetDeviceCertificate(cert, certLen, certLen);
+    err = GetDeviceCertificate(cert, certLen);
     SuccessOrExit(err);
 
     // Copy encoded operational device certificate.
@@ -192,36 +286,17 @@ WEAVE_ERROR CertificateProvisioningClient::EncodeOpCert(TLVWriter & writer, uint
     SuccessOrExit(err);
 
 exit:
-    if (cert != NULL)
-    {
-        MemoryFree(cert);
-    }
     return err;
 }
 
-WEAVE_ERROR CertificateProvisioningClient::EncodeOpRelatedCerts(TLVWriter & writer, uint64_t tag)
+WEAVE_ERROR MockCertificateProvisioningClient::EncodeOpRelatedCerts(TLVWriter & writer, uint64_t tag)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
     uint8_t * icaCerts = NULL;
-    size_t icaCertsLen = 0;
-
-    // Determine if present and the length of the operational device intermediate CA certificates.
-    err = ConfigurationMgr().GetDeviceIntermediateCACerts((uint8_t *)NULL, 0, icaCertsLen);
-    if (err == WEAVE_DEVICE_ERROR_CONFIG_NOT_FOUND)
-    {
-        // Exit without error if operational device intermediate CA certificates is not configured.
-        ExitNow(err = WEAVE_NO_ERROR);
-    }
-    SuccessOrExit(err);
-
-    VerifyOrExit(icaCertsLen != 0, err = WEAVE_ERROR_CERT_NOT_FOUND);
-
-    // Create a temporary buffer to hold the operational device intermediate CA certificates.
-    icaCerts = static_cast<uint8_t *>(MemoryAlloc(icaCertsLen));
-    VerifyOrExit(icaCerts != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    uint16_t icaCertsLen = 0;
 
     // Read the operational device intermediate CA certificates.
-    err = ConfigurationMgr().GetDeviceCertificate(icaCerts, icaCertsLen, icaCertsLen);
+    err = GetDeviceCertificate(icaCerts, icaCertsLen);
     SuccessOrExit(err);
 
     // Copy encoded operational device intermediate CA certificates.
@@ -229,32 +304,17 @@ WEAVE_ERROR CertificateProvisioningClient::EncodeOpRelatedCerts(TLVWriter & writ
     SuccessOrExit(err);
 
 exit:
-    if (icaCerts != NULL)
-    {
-        MemoryFree(icaCerts);
-    }
     return err;
 }
 
-WEAVE_ERROR CertificateProvisioningClient::GenerateAndEncodeOpSig(const uint8_t * hash, uint8_t hashLen, TLVWriter & writer, uint64_t tag)
+WEAVE_ERROR MockCertificateProvisioningClient::GenerateAndEncodeOpSig(const uint8_t * hash, uint8_t hashLen, TLVWriter & writer, uint64_t tag)
 {
     WEAVE_ERROR err;
     uint8_t * privKey = NULL;
-    size_t privKeyLen = 0;
-
-    // Determine the length of the operational device private key.
-    err = ConfigurationMgr().GetDevicePrivateKey((uint8_t *)NULL, 0, privKeyLen);
-    SuccessOrExit(err);
-
-    // Fail if no operational device private key has been configured.
-    VerifyOrExit(privKeyLen != 0, err = WEAVE_ERROR_KEY_NOT_FOUND);
-
-    // Create a temporary buffer to hold the operational device private key.
-    privKey = static_cast<uint8_t *>(MemoryAlloc(privKeyLen));
-    VerifyOrExit(privKey != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    uint16_t privKeyLen = 0;
 
     // Read the operational device private key.
-    err = ConfigurationMgr().GetDevicePrivateKey(privKey, privKeyLen, privKeyLen);
+    err = GetDevicePrivateKey(privKey, privKeyLen);
     SuccessOrExit(err);
 
     // Generate and encode operational device signature.
@@ -262,35 +322,19 @@ WEAVE_ERROR CertificateProvisioningClient::GenerateAndEncodeOpSig(const uint8_t 
     SuccessOrExit(err);
 
 exit:
-    if (privKey != NULL)
-    {
-        MemoryFree(privKey);
-    }
     return err;
 }
 
 // ===== Methods that implement the WeaveNodeMfrAttestDelegate interface
 
-WEAVE_ERROR CertificateProvisioningClient::EncodeMAInfo(TLVWriter & writer)
+WEAVE_ERROR MockCertificateProvisioningClient::EncodeMAInfo(TLVWriter & writer)
 {
     WEAVE_ERROR err;
     uint8_t * cert = NULL;
-    size_t certLen = 0;
-    size_t icaCertsLen = 0;
-
-    // Determine the length of the manufacturer assigned device certificate.
-    err = ConfigurationMgr().GetManufacturerDeviceCertificate((uint8_t *)NULL, 0, certLen);
-    SuccessOrExit(err);
-
-    // Fail if no manufacturer attestation device certificate has been configured.
-    VerifyOrExit(certLen != 0, err = WEAVE_ERROR_CERT_NOT_FOUND);
-
-    // Create a temporary buffer to hold the manufacturer attestation device certificate.
-    cert = static_cast<uint8_t *>(MemoryAlloc(certLen));
-    VerifyOrExit(cert != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    uint16_t certLen = 0;
 
     // Read the manufacturer assigned device certificate.
-    err = ConfigurationMgr().GetManufacturerDeviceCertificate(cert, certLen, certLen);
+    err = GetManufacturerDeviceCertificate(cert, certLen);
     SuccessOrExit(err);
 
     // Copy encoded manufacturer attestation device certificate.
@@ -298,64 +342,32 @@ WEAVE_ERROR CertificateProvisioningClient::EncodeMAInfo(TLVWriter & writer)
     SuccessOrExit(err);
 
     // Determine if present and the length of the manufacturer assigned device intermediate CA certificates.
-    err = ConfigurationMgr().GetManufacturerDeviceIntermediateCACerts((uint8_t *)NULL, 0, icaCertsLen);
-    if (err == WEAVE_DEVICE_ERROR_CONFIG_NOT_FOUND)
+    err = GetManufacturerDeviceIntermediateCACerts(cert, certLen);
+    if (cert == NULL && certLen == 0)
     {
         // Exit without error if manufacturer assigned intermediate CA certificates is not configured.
         ExitNow(err = WEAVE_NO_ERROR);
     }
     SuccessOrExit(err);
 
-    {
-        VerifyOrExit(icaCertsLen != 0, err = WEAVE_ERROR_CERT_NOT_FOUND);
-
-        // If needed, allocate larger buffer to hold the intermediate CA certificates.
-        if (icaCertsLen > certLen)
-        {
-            MemoryFree(cert);
-
-            cert = static_cast<uint8_t *>(MemoryAlloc(icaCertsLen));
-            VerifyOrExit(cert != NULL, err = WEAVE_ERROR_NO_MEMORY);
-        }
-
-        // Read the manufacturer assigned device intermediate CA certificates.
-        err = ConfigurationMgr().GetManufacturerDeviceIntermediateCACerts(cert, icaCertsLen, icaCertsLen);
-        SuccessOrExit(err);
-
-        // Copy encoded manufacturer attestation device intermediate CA certificates.
-        err = writer.CopyContainer(ContextTag(kTag_GetCertReqMsg_MfrAttest_WeaveRelCerts), cert, icaCertsLen);
-        SuccessOrExit(err);
-    }
+    // Copy encoded manufacturer attestation device intermediate CA certificates.
+    err = writer.CopyContainer(ContextTag(kTag_GetCertReqMsg_MfrAttest_WeaveRelCerts), cert, certLen);
+    SuccessOrExit(err);
 
 exit:
-    if (cert != NULL)
-    {
-        MemoryFree(cert);
-    }
     return err;
 }
 
-WEAVE_ERROR CertificateProvisioningClient::GenerateAndEncodeMASig(const uint8_t * data, uint16_t dataLen, TLVWriter & writer)
+WEAVE_ERROR MockCertificateProvisioningClient::GenerateAndEncodeMASig(const uint8_t * data, uint16_t dataLen, TLVWriter & writer)
 {
     WEAVE_ERROR err;
     uint8_t * privKey = NULL;
-    size_t privKeyLen = 0;
+    uint16_t privKeyLen = 0;
     nl::Weave::Platform::Security::SHA256 sha256;
     uint8_t hash[SHA256::kHashLength];
 
-    // Determine the length of the manufacturer attestation device private key.
-    err = ConfigurationMgr().GetManufacturerDevicePrivateKey((uint8_t *)NULL, 0, privKeyLen);
-    SuccessOrExit(err);
-
-    // Fail if no manufacturer attestation device private key has been configured.
-    VerifyOrExit(privKeyLen != 0, err = WEAVE_ERROR_KEY_NOT_FOUND);
-
-    // Create a temporary buffer to hold the manufacturer attestation device private key.
-    privKey = static_cast<uint8_t *>(MemoryAlloc(privKeyLen));
-    VerifyOrExit(privKey != NULL, err = WEAVE_ERROR_NO_MEMORY);
-
     // Read the manufacturer attestation device private key.
-    err = ConfigurationMgr().GetManufacturerDevicePrivateKey(privKey, privKeyLen, privKeyLen);
+    err = GetManufacturerDevicePrivateKey(privKey, privKeyLen);
     SuccessOrExit(err);
 
     // Calculate data hash.
@@ -373,65 +385,71 @@ WEAVE_ERROR CertificateProvisioningClient::GenerateAndEncodeMASig(const uint8_t 
     SuccessOrExit(err);
 
 exit:
-    if (privKey != NULL)
-    {
-        MemoryFree(privKey);
-    }
     return err;
 }
 
 // ===== Members for internal use by this class only.
 
-void CertificateProvisioningClient::OnPlatformEvent(const WeaveDeviceEvent * event)
-{
-    // If a tunnel to the service has been established...
-    // OR if service connectivity has been established (e.g. via Thread)...
-    if ((event->Type == DeviceEventType::kServiceTunnelStateChange &&
-         event->ServiceTunnelStateChange.Result == kConnectivity_Established) ||
-        (event->Type == DeviceEventType::kServiceConnectivityChange &&
-         event->ServiceConnectivityChange.Overall.Result == kConnectivity_Established))
-    {
-        // If the system is waiting for the service connectivity to be established,
-        // initiate the Certificate Provisioning now.
-        if (mWaitingForServiceConnectivity)
-        {
-            StartCertificateProvisioning();
-        }
-    }
-}
+// void MockCertificateProvisioningClient::OnPlatformEvent(const WeaveDeviceEvent * event)
+// {
+//     // If a tunnel to the service has been established...
+//     // OR if service connectivity has been established (e.g. via Thread)...
+//     if ((event->Type == DeviceEventType::kServiceTunnelStateChange &&
+//          event->ServiceTunnelStateChange.Result == kConnectivity_Established) ||
+//         (event->Type == DeviceEventType::kServiceConnectivityChange &&
+//          event->ServiceConnectivityChange.Overall.Result == kConnectivity_Established))
+//     {
+//         // If the system is waiting for the service connectivity to be established,
+//         // initiate the Certificate Provisioning now.
+//         if (mWaitingForServiceConnectivity)
+//         {
+//             StartCertificateProvisioning();
+//         }
+//     }
+// }
 
-void CertificateProvisioningClient::StartCertificateProvisioning(void)
+void MockCertificateProvisioningClient::StartCertificateProvisioning(void * reqState)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
+    // IPAddress endPointAddr;
+
+    mReqState = reqState;
+
+    // VerifyOrExit(IPAddress::FromString(CertificateProvisioningServerAddr, endPointAddr), err = WEAVE_ERROR_INVALID_ADDRESS);
 
     // If the system does not currently have a tunnel established with the service,
     // AND the system does not have service connectivity by some other means (e.g. Thread)
     // wait a period of time for connectivity to be established.
-    if (!ConnectivityMgr().HaveServiceConnectivity() && !ConnectivityMgr().IsServiceTunnelConnected())
-    {
-        mWaitingForServiceConnectivity = true;
+    // if (!ConnectivityMgr().HaveServiceConnectivity() && !ConnectivityMgr().IsServiceTunnelConnected())
+    // {
+    //     mWaitingForServiceConnectivity = true;
 
-        err = SystemLayer.StartTimer(WEAVE_DEVICE_CONFIG_CERTIFICATE_PROVISIONING_CONNECTIVITY_TIMEOUT,
-                                     HandleServiceConnectivityTimeout, this);
-        SuccessOrExit(err);
-        ExitNow();
+    //     err = SystemLayer.StartTimer(WEAVE_DEVICE_CONFIG_CERTIFICATE_PROVISIONING_CONNECTIVITY_TIMEOUT,
+    //                                  HandleServiceConnectivityTimeout, this);
+    //     SuccessOrExit(err);
+    //     ExitNow();
 
-        WeaveLogProgress(DeviceLayer, "Waiting for service connectivity to complete RegisterServicePairDevice action");
-    }
+    //     printf("Waiting for service connectivity to complete RegisterServicePairDevice action");
+    // }
 
-    mWaitingForServiceConnectivity = false;
-    SystemLayer.CancelTimer(HandleServiceConnectivityTimeout, this);
+    // mWaitingForServiceConnectivity = false;
+    // SystemLayer.CancelTimer(HandleServiceConnectivityTimeout, this);
 
-    WeaveLogProgress(DeviceLayer, "Initiating communication with Service Provisioning service");
+    printf("Initiating communication with Certificate Provisioning service");
 
-    // Create a binding and begin the process of preparing it for talking to the Certificate Provisioning
-    // service. When this completes HandleCertProvBindingEvent will be called with a BindingReady event.
-    mBinding = nl::Weave::DeviceLayer::ExchangeMgr.NewBinding(HandleCertProvBindingEvent, NULL);
+    // Create a binding and begin the process of preparing it for talking to the Certificate Provisioning service.
+    mBinding = ExchangeMgr->NewBinding(HandleCertificateProvisioningBindingEvent, this);
     VerifyOrExit(mBinding != NULL, err = WEAVE_ERROR_NO_MEMORY);
+
+    // err = mBinding->BeginConfiguration()
+    //         .Target_ServiceEndpoint(WEAVE_DEVICE_CONFIG_CERTIFICATE_PROVISIONING_ENDPOINT_ID)
+    //         .Transport_UDP_WRM()
+    //         .Exchange_ResponseTimeoutMsec(WEAVE_DEVICE_CONFIG_GET_CERTIFICATE_REQUEST_TIMEOUT)
+    //         .Security_SharedCASESession()
+    //         .PrepareBinding();
     err = mBinding->BeginConfiguration()
-            .Target_ServiceEndpoint(WEAVE_DEVICE_CONFIG_CERTIFICATE_PROVISIONING_ENDPOINT_ID)
+            .Target_ServiceEndpoint(CertificateProvisioningEndPointId)
             .Transport_UDP_WRM()
-            .Exchange_ResponseTimeoutMsec(WEAVE_DEVICE_CONFIG_GET_CERTIFICATE_REQUEST_TIMEOUT)
             .Security_SharedCASESession()
             .PrepareBinding();
     SuccessOrExit(err);
@@ -446,11 +464,62 @@ exit:
     }
 }
 
-void CertificateProvisioningClient::SendGetCertificateRequest(void)
+void MockCertificateProvisioningClient::HandleCertificateProvisioningBindingEvent(void *const appState,
+                                                                                  const nl::Weave::Binding::EventType event,
+                                                                                  const nl::Weave::Binding::InEventParam &inParam,
+                                                                                  nl::Weave::Binding::OutEventParam &outParam)
+{
+    uint32_t statusReportProfileId;
+    uint16_t statusReportStatusCode;
+    MockCertificateProvisioningClient *client = static_cast<MockCertificateProvisioningClient *>(appState);
+
+    switch (event)
+    {
+    case Binding::kEvent_BindingReady:
+        printf("Certificate Provisioning client binding ready\n");
+
+        client->SendGetCertificateRequest();
+        break;
+
+    case Binding::kEvent_PrepareFailed:
+        printf("Certificate Provisioning client binding prepare failed: %s\n", nl::ErrorStr(inParam.PrepareFailed.Reason));
+
+        if (inParam.PrepareFailed.StatusReport != NULL)
+        {
+            statusReportProfileId = inParam.PrepareFailed.StatusReport->mProfileId;
+            statusReportStatusCode = inParam.PrepareFailed.StatusReport->mStatusCode;
+        }
+        else
+        {
+            statusReportProfileId = kWeaveProfile_Security;
+            statusReportStatusCode = Profiles::Security::kStatusCode_ServiceCommunicationError;
+        }
+
+        client->HandleCertificateProvisioningResult(inParam.PrepareFailed.Reason,
+                statusReportProfileId, statusReportStatusCode);
+        break;
+
+    case nl::Weave::Binding::kEvent_BindingFailed:
+        printf("Certificate Provisioning client binding failed: %s\n", nl::ErrorStr(inParam.BindingFailed.Reason));
+
+        statusReportProfileId = kWeaveProfile_Security;
+        statusReportStatusCode = Profiles::Security::kStatusCode_ServiceCommunicationError;
+
+        client->HandleCertificateProvisioningResult(inParam.BindingFailed.Reason,
+                statusReportProfileId, statusReportStatusCode);
+        break;
+
+    default:
+        Binding::DefaultEventHandler(appState, event, inParam, outParam);
+        break;
+    }
+}
+
+void MockCertificateProvisioningClient::SendGetCertificateRequest(void)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
 
-    WeaveLogProgress(DeviceLayer, "Sending GetCertificateRequest to Certificate Provisioning service");
+    printf("Sending GetCertificateRequest to Certificate Provisioning service");
 
     err = mCertProvEngine.StartCertificateProvisioning(mReqType, mDoMfrAttest);
     SuccessOrExit(err);
@@ -462,7 +531,7 @@ exit:
     }
 }
 
-void CertificateProvisioningClient::HandleCertificateProvisioningResult(WEAVE_ERROR err, uint32_t statusReportProfileId, uint16_t statusReportStatusCode)
+void MockCertificateProvisioningClient::HandleCertificateProvisioningResult(WEAVE_ERROR err, uint32_t statusReportProfileId, uint16_t statusReportStatusCode)
 {
     // Close the binding if necessary.
     if (mBinding != NULL)
@@ -473,7 +542,7 @@ void CertificateProvisioningClient::HandleCertificateProvisioningResult(WEAVE_ER
 
     if (err != WEAVE_NO_ERROR)
     {
-        WeaveLogError(DeviceLayer, "Certificate Provisioning failed with %s: %s",
+        printf("Certificate Provisioning failed with %s: %s",
                  (err == WEAVE_ERROR_STATUS_REPORT_RECEIVED) ? "status report from service" : "local error",
                  (err == WEAVE_ERROR_STATUS_REPORT_RECEIVED)
                   ? ::nl::StatusReportStr(statusReportProfileId, statusReportStatusCode)
@@ -498,48 +567,180 @@ void CertificateProvisioningClient::HandleCertificateProvisioningResult(WEAVE_ER
     }
 }
 
-void CertificateProvisioningClient::HandleServiceConnectivityTimeout(System::Layer * aSystemLayer, void * aAppState, System::Error aErr)
+void MockCertificateProvisioningClient::HandleServiceConnectivityTimeout(System::Layer * aSystemLayer, void * aAppState, System::Error aErr)
 {
-    CertificateProvisioningClient *client = static_cast<CertificateProvisioningClient *>(aAppState);
+    MockCertificateProvisioningClient *client = static_cast<MockCertificateProvisioningClient *>(aAppState);
 
     client->HandleCertificateProvisioningResult(WEAVE_ERROR_TIMEOUT, 0, 0);
 }
 
-void CertificateProvisioningClient::HandleCertProvBindingEvent(void * appState, Binding::EventType eventType,
-            const Binding::InEventParam & inParam, Binding::OutEventParam & outParam)
-{
-    uint32_t statusReportProfileId;
-    uint16_t statusReportStatusCode;
-    CertificateProvisioningClient *client = static_cast<CertificateProvisioningClient *>(appState);
+// ===== Persisted Operational Device Credentials.
 
-    switch (eventType)
-    {
-    case Binding::kEvent_BindingReady:
-        client->SendGetCertificateRequest();
-        break;
-    case Binding::kEvent_PrepareFailed:
-        if (inParam.PrepareFailed.StatusReport != NULL)
-        {
-            statusReportProfileId = inParam.PrepareFailed.StatusReport->mProfileId;
-            statusReportStatusCode = inParam.PrepareFailed.StatusReport->mStatusCode;
-        }
-        else
-        {
-            statusReportProfileId = kWeaveProfile_Security;
-            statusReportStatusCode = Profiles::Security::kStatusCode_ServiceCommunicationError;
-        }
-        client->HandleCertificateProvisioningResult(inParam.PrepareFailed.Reason,
-                statusReportProfileId, statusReportStatusCode);
-        break;
-    default:
-        Binding::DefaultEventHandler(appState, eventType, inParam, outParam);
-        break;
-    }
+WEAVE_ERROR MockCertificateProvisioningClient::GetDeviceId(uint64_t & deviceId)
+{
+    deviceId = mDeviceId;
+
+    return WEAVE_NO_ERROR;
 }
 
-#endif // WEAVE_DEVICE_CONFIG_ENABLE_JUST_IN_TIME_PROVISIONING
+WEAVE_ERROR MockCertificateProvisioningClient::GetDeviceCertificate(uint8_t *& cert, uint16_t & certLen)
+{
+    cert = mDeviceCert;
+    certLen = mDeviceCertLen;
 
-} // namespace Internal
-} // namespace DeviceLayer
-} // namespace Weave
-} // namespace nl
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::GetDeviceIntermediateCACerts(uint8_t *& certs, uint16_t & certsLen)
+{
+    certs = mDeviceIntermediateCACerts;
+    certsLen = mDeviceIntermediateCACertsLen;
+
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::GetDevicePrivateKey(uint8_t *& key, uint16_t & keyLen)
+{
+    key = mDevicePrivateKey;
+    keyLen = mDevicePrivateKeyLen;
+
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::StoreDeviceId(uint64_t deviceId)
+{
+    mDeviceId = deviceId;
+
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::StoreDeviceCertificate(const uint8_t * cert, uint16_t certLen)
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
+    uint8_t *certCopy = NULL;
+
+    certCopy = (uint8_t *)malloc(certLen);
+    VerifyOrExit(certCopy != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    memcpy(certCopy, cert, certLen);
+
+    if (mDeviceCert != NULL)
+        free(mDeviceCert);
+
+    mDeviceCert = certCopy;
+    mDeviceCertLen = certLen;
+
+    // Setup to use operational device certificate in subsequence CASE sessions.
+    gCASEOptions.NodeCert = mDeviceCert;
+    gCASEOptions.NodeCertLength = mDeviceCertLen;
+
+exit:
+    if (err != WEAVE_NO_ERROR && certCopy != NULL)
+        free(certCopy);
+    return err;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::StoreDeviceIntermediateCACerts(const uint8_t * certs, uint16_t certsLen)
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
+    uint8_t *certsCopy = NULL;
+
+    certsCopy = (uint8_t *)malloc(certsLen);
+    VerifyOrExit(certsCopy != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    memcpy(certsCopy, certs, certsLen);
+
+    if (mDeviceIntermediateCACerts != NULL)
+        free(mDeviceIntermediateCACerts);
+
+    mDeviceIntermediateCACerts = certsCopy;
+    mDeviceIntermediateCACertsLen = certsLen;
+
+    // Setup to use operational device intermediate CA certificates in subsequence CASE sessions.
+    gCASEOptions.NodeCert = mDeviceIntermediateCACerts;
+    gCASEOptions.NodeCertLength = mDeviceIntermediateCACertsLen;
+
+exit:
+    if (err != WEAVE_NO_ERROR && certsCopy != NULL)
+        free(certsCopy);
+    return err;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::StoreDevicePrivateKey(const uint8_t * key, uint16_t keyLen)
+{
+    WEAVE_ERROR err = WEAVE_NO_ERROR;
+    uint8_t *keyCopy = NULL;
+
+    keyCopy = (uint8_t *)malloc(keyLen);
+    VerifyOrExit(keyCopy != NULL, err = WEAVE_ERROR_NO_MEMORY);
+    memcpy(keyCopy, key, keyLen);
+
+    if (mDevicePrivateKey != NULL)
+        free(mDevicePrivateKey);
+
+    mDevicePrivateKey = keyCopy;
+    mDevicePrivateKeyLen = keyLen;
+
+    // Setup to use operational device private key in subsequence CASE sessions.
+    gCASEOptions.NodeCert = mDevicePrivateKey;
+    gCASEOptions.NodeCertLength = mDevicePrivateKeyLen;
+
+exit:
+    if (err != WEAVE_NO_ERROR && keyCopy != NULL)
+        free(keyCopy);
+    return err;
+}
+
+void MockCertificateProvisioningClient::ClearOperationalDeviceCredentials(void)
+{
+    mDeviceId = kNodeIdNotSpecified;
+    if (mDeviceCert != NULL)
+    {
+        free(mDeviceCert);
+        mDeviceCert = NULL;
+    }
+    mDeviceCertLen = 0;
+    if (mDeviceIntermediateCACerts != NULL)
+    {
+        free(mDeviceIntermediateCACerts);
+        mDeviceIntermediateCACerts = NULL;
+    }
+    mDeviceIntermediateCACertsLen = 0;
+    if (mDevicePrivateKey != NULL)
+    {
+        free(mDevicePrivateKey);
+        mDevicePrivateKey = NULL;
+    }
+    mDevicePrivateKeyLen = 0;
+
+    gCASEOptions.NodeCert = NULL;
+    gCASEOptions.NodeCertLength = 0;
+    gCASEOptions.NodeIntermediateCert = NULL;
+    gCASEOptions.NodeIntermediateCertLength = 0;
+    gCASEOptions.NodePrivateKey = NULL;
+    gCASEOptions.NodePrivateKeyLength = 0;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::GetManufacturerDeviceCertificate(uint8_t *& cert, uint16_t & certLen)
+{
+    // TODO: Fix it
+    cert = mDeviceCert;
+    certLen = mDeviceCertLen;
+
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::GetManufacturerDeviceIntermediateCACerts(uint8_t *& certs, uint16_t & certsLen)
+{
+    certs = NULL;
+    certsLen = 0;
+
+    return WEAVE_NO_ERROR;
+}
+
+WEAVE_ERROR MockCertificateProvisioningClient::GetManufacturerDevicePrivateKey(uint8_t *& key, uint16_t & keyLen)
+{
+    // TODO: Fix it
+    key = mDevicePrivateKey;
+    keyLen = mDevicePrivateKeyLen;
+
+    return WEAVE_NO_ERROR;
+}

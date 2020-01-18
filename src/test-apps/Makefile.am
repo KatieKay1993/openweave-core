@@ -84,6 +84,7 @@ noinst_HEADERS                                             = \
     DMTestClient.h                                           \
     DeviceDescOptions.h                                      \
     KeyExportOptions.h                                       \
+    MockCPClient.h                                           \
     MockDCLPServer.h                                         \
     MockDCServer.h                                           \
     MockDDServer.h                                           \
@@ -1457,6 +1458,7 @@ infratest_SOURCES                        = infratest.cpp
 infratest_LDADD                          = $(COMMON_LDADD)
 
 mock_device_SOURCES                      = mock-device.cpp                                          \
+                                           MockCPClient.cpp                                         \
                                            MockDCLPServer.cpp                                       \
                                            MockDCServer.cpp                                         \
                                            MockDDServer.cpp                                         \

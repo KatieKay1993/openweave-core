@@ -94,7 +94,7 @@ WEAVE_ERROR MockServiceProvisioningServer::Init(WeaveExchangeManager *exchangeMg
     mPersistedServiceConfigLen = 0;
     mPairingServerCon = NULL;
     mPairingServerBinding = NULL;
-    mMockCAClient = NULL;
+    mMockCPClient = NULL;
 
 exit:
     return err;
@@ -238,7 +238,8 @@ WEAVE_ERROR MockServiceProvisioningServer::HandleRegisterServicePairAccount(Regi
         ExitNow();
     }
 
-    AsyncStartCertificateProvisioning();
+    err = StartCertificateProvisioning();
+    SuccessOrExit(err);
 
     /*
     if (kPairingTransport_TCP == PairingTransport)
@@ -281,35 +282,36 @@ exit:
     return err;
 }
 
-static void MockServiceProvisioningServer::AsyncStartCertificateProvisioning()
+WEAVE_ERROR MockServiceProvisioningServer::StartCertificateProvisioning()
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
 
     // Allocate temporary memory to hold the mock certificate provisioning client.
-    mMockCPClient = static_cast<MockCertificateProvisioningClient *>(MemoryAlloc(sizeof(MockCertificateProvisioningClient)));
+    mMockCPClient = static_cast<MockCertificateProvisioningClient *>(malloc(sizeof(MockCertificateProvisioningClient)));
     VerifyOrExit(mMockCPClient != NULL, err = WEAVE_ERROR_NO_MEMORY);
 
     // Initialize mock certificate provisioning client.
-    err = mMockCPClient->Init(WeaveCertProvEngine::kReqType_GetInitialOpDeviceCert, EncodeGetCertificateRequestAuthInfo);
+    err = mMockCPClient->Init(ExchangeMgr, WeaveCertProvEngine::kReqType_GetInitialOpDeviceCert, EncodeGetCertificateRequestAuthInfo);
     SuccessOrExit(err);
 
     // Start certificate provisioning.
-    mMockCPClient->StartCertificateProvisioning();
+    mMockCPClient->StartCertificateProvisioning(this);
 
 exit:
-    if (err != WEAVE_NO_ERROR)
+    if (err != WEAVE_NO_ERROR && mMockCPClient != NULL)
     {
-        MemoryFree(mMockCPClient);
+        free(mMockCPClient);
         mMockCPClient = NULL;
-
-        HandlePairDeviceToAccountResult(err, kWeaveProfile_Common, Profiles::Common::kStatus_InternalServerProblem);
     }
+
+    return err;
 }
 
-WEAVE_ERROR MockServiceProvisioningServer::EncodeGetCertificateRequestAuthInfo(TLVWriter & writer)
+WEAVE_ERROR MockServiceProvisioningServer::EncodeGetCertificateRequestAuthInfo(void *const appState, TLVWriter & writer)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
-    const RegisterServicePairAccountMessage & regServiceMsg = mCurClientOpMsg.RegisterServicePairAccount;
+    MockServiceProvisioningServer *server = (MockServiceProvisioningServer *) appState;
+    const RegisterServicePairAccountMessage & regServiceMsg = server->mCurClientOpMsg.RegisterServicePairAccount;
 
     // Encode pairing token.
     err = writer.PutBytes(ContextTag(kTag_GetCertReqMsg_Authorize_PairingToken), regServiceMsg.PairingToken, regServiceMsg.PairingTokenLen);
@@ -323,11 +325,22 @@ exit:
     return err;
 }
 
-static WEAVE_ERROR MockServiceProvisioningServer::HandleCertificateProvisioningResult(nl::Weave::WeaveConnection *con, WEAVE_ERROR conErr)
+WEAVE_ERROR MockServiceProvisioningServer::HandleCertificateProvisioningResult(void *const appState, WEAVE_ERROR localErr,
+                                                                               uint32_t statusReportProfileId, uint16_t statusReportStatusCode)
 {
     WEAVE_ERROR err = WEAVE_NO_ERROR;
+    MockServiceProvisioningServer *server = (MockServiceProvisioningServer *) appState;
 
-exit:
+    if (server->mMockCPClient != NULL)
+    {
+        free(server->mMockCPClient);
+        server->mMockCPClient = NULL;
+    }
+
+    // exit:
+    if (err != WEAVE_NO_ERROR)
+        server->HandlePairDeviceToAccountResult(err, kWeaveProfile_Common, Profiles::Common::kStatus_InternalServerProblem);
+
     return err;
 }
 

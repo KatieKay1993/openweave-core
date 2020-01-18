@@ -18,26 +18,21 @@
 
 /**
  *    @file
- *          Defines the Device Layer CertificateProvisioningClient object.
+ *          Defines the Device Layer MockCertificateProvisioningClient object.
  */
 
-#ifndef CERTIFICATE_PROVISIONING_CLIENT_H
-#define CERTIFICATE_PROVISIONING_CLIENT_H
+#ifndef MOCKCPCLIENT_H_
+#define MOCKCPCLIENT_H_
 
-#include <Weave/DeviceLayer/internal/WeaveDeviceLayerInternal.h>
+#include <Weave/Core/WeaveCore.h>
 #include <Weave/Profiles/security/WeaveCertProvisioning.h>
-
-namespace nl {
-namespace Weave {
-namespace DeviceLayer {
-namespace Internal {
 
 using nl::Weave::Profiles::Security::CertProvisioning::WeaveCertProvEngine;
 
 /**
  * Implements the Weave Certificate Provisioning profile for a Weave device.
  */
-class CertificateProvisioningClient final
+class MockCertificateProvisioningClient final
     : public ::nl::Weave::Profiles::Security::CertProvisioning::WeaveNodeOpAuthDelegate,
       public ::nl::Weave::Profiles::Security::CertProvisioning::WeaveNodeMfrAttestDelegate
 {
@@ -48,15 +43,26 @@ public:
      *  This function is the callback that is invoked by Certificate Provisioning Client to add
      *  authorization info to the GetCertificateRequest message in a TLV form to the supplied TLV writer.
      *
+     *  @param[in]  appState    A pointer to a higher layer object.
      *  @param[in]  writer      A reference to a TLV writer to write request authorization data.
      */
-    typedef WEAVE_ERROR (* EncodeReqAuthInfoFunct)(TLVWriter & writer);
+    typedef WEAVE_ERROR (* EncodeReqAuthInfoFunct)(void *const appState, TLVWriter & writer);
+
+    MockCertificateProvisioningClient(void);
 
     // ===== Members for internal use by other Device Layer components.
 
-    WEAVE_ERROR Init(uint8_t reqType);
-    WEAVE_ERROR Init(uint8_t reqType, EncodeReqAuthInfoFunct encodeReqAuthInfo);
-    void OnPlatformEvent(const WeaveDeviceEvent * event);
+    WEAVE_ERROR Init(WeaveExchangeManager *exchangeMgr, uint8_t reqType, EncodeReqAuthInfoFunct encodeReqAuthInfo);
+    WEAVE_ERROR Shutdown(void);
+
+    void Reset(void);
+    void Preconfig(void);
+
+    uint64_t CertificateProvisioningEndPointId;
+    /* const char *CertificateProvisioningServerAddr; */
+    //    int PairingTransport;
+
+    /* void OnPlatformEvent(const WeaveDeviceEvent * event); */
 
     // ===== Methods that implement the WeaveNodeOpAuthDelegate interface
 
@@ -69,9 +75,9 @@ public:
     WEAVE_ERROR EncodeMAInfo(TLVWriter & writer) __OVERRIDE;
     WEAVE_ERROR GenerateAndEncodeMASig(const uint8_t * data, uint16_t dataLen, TLVWriter & writer) __OVERRIDE;
 
-    // ===== Members that override virtual methods on ServiceProvisioningDelegate
+    // ===== Other Methods
 
-    void StartCertificateProvisioning(void);
+    void StartCertificateProvisioning(void * reqState);
     void HandleCertificateProvisioningResult(WEAVE_ERROR localErr, uint32_t serverStatusProfileId, uint16_t serverStatusCode);
 
 private:
@@ -79,34 +85,46 @@ private:
     // ===== Members for internal use by this class only.
 
     WeaveCertProvEngine mCertProvEngine;
+    WeaveExchangeManager * ExchangeMgr;
     ::nl::Weave::Binding * mBinding;
     uint8_t mReqType;
     bool mDoMfrAttest;
     EncodeReqAuthInfoFunct mEncodeReqAuthInfo;
-    bool mWaitingForServiceConnectivity;
+    void * mReqState;
+    /* bool mWaitingForServiceConnectivity; */
 
     void SendGetCertificateRequest(void);
 
     static void HandleServiceConnectivityTimeout(::nl::Weave::System::Layer * layer, void * appState, ::nl::Weave::System::Error err);
-    static void HandleCertProvBindingEvent(void * appState, nl::Weave::Binding::EventType eventType,
-            const nl::Weave::Binding::InEventParam & inParam, nl::Weave::Binding::OutEventParam & outParam);
-    static void CertProvClientEventHandler(void * appState, WeaveCertProvEngine::EventType eventType, const WeaveCertProvEngine::InEventParam & inParam, WeaveCertProvEngine::OutEventParam & outParam);
+    static void CertProvClientEventHandler(void * appState, WeaveCertProvEngine::EventType eventType,
+                                           const WeaveCertProvEngine::InEventParam & inParam, WeaveCertProvEngine::OutEventParam & outParam);
+    static void HandleCertificateProvisioningBindingEvent(void *const appState,
+                                                          const nl::Weave::Binding::EventType event,
+                                                          const nl::Weave::Binding::InEventParam &inParam,
+                                                          nl::Weave::Binding::OutEventParam &outParam);
 
-protected:
+    // Persisted Operational Device Credentials.
+    uint64_t mDeviceId;
+    uint8_t * mDeviceCert;
+    uint16_t mDeviceCertLen;
+    uint8_t * mDeviceIntermediateCACerts;
+    uint16_t mDeviceIntermediateCACertsLen;
+    uint8_t * mDevicePrivateKey;
+    uint16_t mDevicePrivateKeyLen;
 
-    // Construction/destruction limited to subclasses.
-    CertificateProvisioningClient() = default;
-    ~CertificateProvisioningClient() = default;
+    WEAVE_ERROR GetDeviceId(uint64_t & deviceId);
+    WEAVE_ERROR GetDeviceCertificate(uint8_t *& cert, uint16_t & certLen);
+    WEAVE_ERROR GetDeviceIntermediateCACerts(uint8_t *& certs, uint16_t & certsLen);
+    WEAVE_ERROR GetDevicePrivateKey(uint8_t *& key, uint16_t & keyLen);
+    WEAVE_ERROR StoreDeviceId(uint64_t deviceId);
+    WEAVE_ERROR StoreDeviceCertificate(const uint8_t * cert, uint16_t certLen);
+    WEAVE_ERROR StoreDeviceIntermediateCACerts(const uint8_t * certs, uint16_t certsLen);
+    WEAVE_ERROR StoreDevicePrivateKey(const uint8_t * key, uint16_t keyLen);
+    void ClearOperationalDeviceCredentials(void);
 
-    // No copy, move or assignment.
-    CertificateProvisioningClient(const CertificateProvisioningClient &) = delete;
-    CertificateProvisioningClient(const CertificateProvisioningClient &&) = delete;
-    CertificateProvisioningClient & operator=(const CertificateProvisioningClient &) = delete;
+    WEAVE_ERROR GetManufacturerDeviceCertificate(uint8_t *& cert, uint16_t & certLen);
+    WEAVE_ERROR GetManufacturerDeviceIntermediateCACerts(uint8_t *& certs, uint16_t & certsLen);
+    WEAVE_ERROR GetManufacturerDevicePrivateKey(uint8_t *& key, uint16_t & keyLen);
 };
 
-} // namespace Internal
-} // namespace DeviceLayer
-} // namespace Weave
-} // namespace nl
-
-#endif // CERTIFICATE_PROVISIONING_CLIENT_H
+#endif // MOCKCPCLIENT_H_

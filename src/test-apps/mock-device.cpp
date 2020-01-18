@@ -54,6 +54,7 @@
 #include <Weave/Profiles/service-directory/ServiceDirectory.h>
 #include <Weave/Profiles/heartbeat/WeaveHeartbeat.h>
 #include <Weave/Support/crypto/WeaveCrypto.h>
+#include "MockCPClient.h"
 #include "MockDCLPServer.h"
 #include "MockNPServer.h"
 #include "MockSPServer.h"
@@ -165,6 +166,7 @@ WeaveHeartbeatReceiver HeartbeatReceiver;
 MockNetworkProvisioningServer MockNPServer;
 MockDropcamLegacyPairingServer MockDCLPServer;
 MockServiceProvisioningServer MockSPServer;
+MockCertificateProvisioningClient MockCPClient;
 MockFabricProvisioningServer MockFPServer;
 MockPairingServer MockPairingEPServer;
 MockDeviceDescriptionServer MockDDServer;

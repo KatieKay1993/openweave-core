@@ -87,7 +87,6 @@ private:
     virtual WEAVE_ERROR SendStatusReport(uint32_t statusProfileId, uint16_t statusCode, WEAVE_ERROR sysError = WEAVE_NO_ERROR);
 
     WEAVE_ERROR StartConnectToPairingServer();
-    static void AsyncStartCertificateProvisioning(intptr_t arg);
     static void HandlePairingServerConnectionComplete(nl::Weave::WeaveConnection *con, WEAVE_ERROR conErr);
     static void HandlePairingServerConnectionClosed(nl::Weave::WeaveConnection *con, WEAVE_ERROR conErr);
 
@@ -95,7 +94,11 @@ private:
     static void HandlePairingServerBindingEvent(void *const appState, const nl::Weave::Binding::EventType event,
                                                 const nl::Weave::Binding::InEventParam &inParam,
                                                 nl::Weave::Binding::OutEventParam &outParam);
-    static WEAVE_ERROR EncodeGetCertificateRequestAuthInfo(TLVWriter &writer);
+
+    WEAVE_ERROR StartCertificateProvisioning(void);
+    static WEAVE_ERROR EncodeGetCertificateRequestAuthInfo(void *const appState, TLVWriter &writer);
+    static WEAVE_ERROR HandleCertificateProvisioningResult(void *const appState, WEAVE_ERROR localErr,
+                                                           uint32_t statusReportProfileId, uint16_t statusReportStatusCode);
 };
 
 #endif /* MOCKSPSERVER_H_ */
